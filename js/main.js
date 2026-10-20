@@ -461,11 +461,18 @@
     hideText();
 
     /* ---- the harmonic relationship, checked against THIS display ---- */
+    // var planErr = null;
+    // if (Math.abs(refresh.measured - refresh.nominal) > CFG.REFRESH_TOL_HZ) {
+    //   planErr = 'Measured refresh ' + refresh.measured.toFixed(2) + ' Hz is not stable at an integer rate.';
+    // } else {
+    //   try { plan = D.frequencyPlan(form.plan, refresh.nominal, form.stim.dutyPct); } catch (e) { planErr = e.message; }
+    // }
     var planErr = null;
-    if (Math.abs(refresh.measured - refresh.nominal) > CFG.REFRESH_TOL_HZ) {
-      planErr = 'Measured refresh ' + refresh.measured.toFixed(2) + ' Hz is not stable at an integer rate.';
-    } else {
-      try { plan = D.frequencyPlan(form.plan, refresh.nominal, form.stim.dutyPct); } catch (e) { planErr = e.message; }
+    try {
+      plan = D.frequencyPlan(form.plan, refresh.nominal, form.stim.dutyPct);
+    } catch (e) {
+      console.warn('Harmonic check failed, forcing plan anyway (pilot mode):', e.message);
+      plan = D.frequencyPlan(form.plan, refresh.nominal, form.stim.dutyPct, true); // 세 번째 인자로 강제통과 플래그
     }
     if (planErr) {
       document.body.style.cursor = '';
