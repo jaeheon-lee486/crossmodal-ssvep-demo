@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cross-modal SSVEP</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- setup form (replaced by the canvas once the session starts) -->
+<div id="setup">
+  <div class="sheet">
+    <h1>Cross-modal SSVEP &mdash; behavioural pilot</h1>
+    <p class="sub">Web implementation. Parity id <code id="cfgParity"></code></p>
+
+    <div class="row">
+      <label for="participant">Participant number</label>
+      <input id="participant" type="number" min="0" autocomplete="off" placeholder="e.g. 7">
+    </div>
+    <div class="row">
+      <label for="colorMap">Colour map</label>
+      <select id="colorMap">
+        <option value="0">0 &mdash; A (13.33 Hz) red, B (12 Hz) blue</option>
+        <option value="1">1 &mdash; A (13.33 Hz) blue, B (12 Hz) red</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="plan">Frequency plan</label>
+      <select id="plan">
+        <option value="standard">standard &mdash; needs 120 Hz (A 13.33/3.33, B 12/4)</option>
+        <option value="fallback60">fallback60 &mdash; 60 Hz only (A 10/3.33, B 12/4)</option>
+      </select>
+    </div>
+    <div class="row">
+      <label for="seed">Trial-list seed</label>
+      <input id="seed" type="number" value="12345" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="distCm">Viewing distance (cm)</label>
+      <input id="distCm" type="number" step="0.5">
+    </div>
+    <div class="row">
+      <label for="widthCm">Screen width (cm)</label>
+      <input id="widthCm" type="number" step="0.5">
+    </div>
+    <div class="row">
+      <label for="cohBgPct">Background coherence (%)</label>
+      <input id="cohBgPct" type="number" min="0" max="100" step="any" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="cohTgtPct">Target coherence (%)</label>
+      <input id="cohTgtPct" type="number" min="0" max="100" step="any" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="dutyPct">Coherence duty cycle (%)</label>
+      <input id="dutyPct" type="number" min="0" max="100" step="any" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="speedDegS">Normal dot speed (&deg;/s)</label>
+      <input id="speedDegS" type="number" min="0" max="40" step="any" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="burstSpeedDegS">Burst (target) dot speed (&deg;/s)</label>
+      <input id="burstSpeedDegS" type="number" min="0" max="40" step="any" autocomplete="off">
+    </div>
+
+    <p class="note">
+      Colour map and seed fill in from the participant number (map = number mod&nbsp;2,
+      seed = 100000 + number); override only deliberately. Measure the visible screen width
+      and the eye-to-screen distance &mdash; every size in degrees depends on them.
+      <strong>The display must be set to 120&nbsp;Hz</strong>; the session refuses to start
+      if the measured refresh cannot carry the chosen frequency plan.
+    </p>
+    <p class="note">
+      Coherence: % of each colour's dots moving together during a background pulse and during a
+      target pulse (target must be higher). Duty cycle: % of each pulse period that is coherent;
+      100&nbsp;= continuous. Speeds: normal applies to every dot except the coherent dots of a
+      target pulse, which move at the burst speed (two independent values, 0&ndash;40&nbsp;&deg;/s).
+      Defaults 50&nbsp;% / 95&nbsp;% / 50&nbsp;%, 5 / 5&nbsp;&deg;/s (DESIGN_LOG.md, DECISIONS 28&ndash;29).
+      All of these are saved with the data.
+    </p>
+
+    <ul class="facts">
+      <li>Design: <span id="cfgTrials"></span></li>
+      <li>Red and blue dot arrays, one aperture; flicker 13.33 / 12 Hz, coherence pulses 3.33 / 4 Hz</li>
+      <li>Task: press SPACE for stronger coherent sweeps (targets) in the cued colour(s)</li>
+    </ul>
+
+    <p class="warn">
+      Contains flickering visual patterns and sound. Do not run with anyone who has
+      epilepsy, a seizure history, or photosensitivity. Set system volume before starting.
+    </p>
+
+    <p class="err" id="formErr"></p>
+    <p><button id="startBtn">Start session</button></p>
+    <p class="hint">
+      <kbd>Esc</kbd> aborts at any time and still saves the trials completed so far.
+      &middot; <a href="verify/verify.html">run the parity verifier</a>
+    </p>
+  </div>
+</div>
+
+<canvas id="stage" style="display:none"></canvas>
+<div id="overlay" style="display:none"></div>
+
+<script src="js/config.js"></script>
+<script src="js/rng.js"></script>
+<script src="js/design.js"></script>
+<script src="js/stim.js"></script>
+<script src="js/data.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

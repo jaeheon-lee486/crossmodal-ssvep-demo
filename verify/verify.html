@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cross-modal SSVEP verifier</title>
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --mut: #6b6b70; --ok: #1a7f37; --bad: #c62828; --line: #e3e3e6; --code: #f4f4f6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111113; --fg: #e8e8ea; --mut: #9a9aa2; --ok: #4ac26b; --bad: #ff6b6b; --line: #2a2a2e; --code: #1b1b1f; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.5 Helvetica, Arial, sans-serif; margin: 0; padding: 24px 16px 60px; }
+  main { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+  .mut { color: var(--mut); }
+  .ok { color: var(--ok); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  table { border-collapse: collapse; font-size: 13px; width: 100%; overflow-x: auto; display: block; }
+  td, th { border-bottom: 1px solid var(--line); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  pre, code { background: var(--code); border-radius: 4px; }
+  pre { padding: 10px; overflow-x: auto; font-size: 12px; }
+  #summary { font-size: 18px; margin: 16px 0; padding: 12px; border: 2px solid var(--line); border-radius: 6px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Cross-modal SSVEP &mdash; parity &amp; design verifier</h1>
+<p class="mut">Runs the real <code>web/js</code> code. No display, no participant. Mirrors
+<code>matlab/verifyDesign.m</code>; both compare against the golden fixture written by
+<code>reference/reference_design.py</code>.</p>
+<div id="summary">running&hellip;</div>
+<div id="out"></div>
+</main>
+
+<script src="../js/config.js"></script>
+<script src="../js/rng.js"></script>
+<script src="../js/design.js"></script>
+<script src="../js/stim.js"></script>
+<script src="../../reference/golden_trials_seed12345.js"></script>
+<script>
+(function () {
+  'use strict';
+  var CFG = window.XMConfig, D = window.XMDesign, S = window.XMStim;
+  var out = document.getElementById('out');
+  var nPass = 0, nFail = 0;
+
+  function head(t) { var h = document.createElement('h2'); h.textContent = t; out.appendChild(h); }
+  function para(html) { var p = document.createElement('p'); p.innerHTML = html; out.appendChild(p); }
+  function report(label, ok, detail) {
+    ok ? nPass++ : nFail++;
+    para('<span class="' + (ok ? 'ok">PASS' : 'bad">FAIL') + '</span> &nbsp;' + label +
+         (detail ? ' <span class="mut">&mdash; ' + detail + '</span>' : ''));
+  }
+  function safe(label, fn) {
+    try { fn(); } catch (e) { report(label, false, 'threw: ' + e.message); }
+  }
+  function close(a, b) { return Math.abs(a - b) < 1e-9; }
+
+  /* ------------------------------------------------ 1. parity */
+  head('1. Trial list vs golden fixture (seed ' + (window.XM_GOLDEN ? window.XM_GOLDEN.seed : '?') + ')');
+  var trials = null;
+  safe('golden comparison', function () {
+    if (!window.XM_GOLDEN) { report('golden fixture loaded', false, 'reference/golden_trials_seed12345.js missing'); return; }
+    report('parity id matches', window.XM_GOLDEN.parityId === CFG.PARITY_ID,
+           'config ' + CFG.PARITY_ID + ', golden ' + window.XM_GOLDEN.parityId);
+    var r = D.generateTrialList(window.XM_GOLDEN.seed);
+    trials = r.trials;
+    var csv = D.toCsv(trials);
+    var same = csv === window.XM_GOLDEN.csv;
+    var detail = trials.length + ' trials, ' + csv.length + ' bytes';
+    if (!same) {
+      var a = csv.split('\n'), b = window.XM_GOLDEN.csv.split('\n');
+      for (var i = 0; i < Math.max(a.length, b.length); i++) {
+        if (a[i] !== b[i]) { detail = 'first difference at line ' + (i + 1) + ':<br><code>js:  ' + a[i] +
+                             '</code><br><code>ref: ' + b[i] + '</code>'; break; }
+      }
+    }
+    report('generated CSV is byte-identical to the Python reference', same, detail);
+  });
+
+  /* ------------------------------------------------ 2. design audit */
+  head('2. Design audit');
+  safe('assertTrialList', function () {
+    D.assertTrialList(trials);
+    report('assertTrialList passes (counts, 1:2:1 target balance, block composition, runs, ' +
+           'eligibility, >= 1.0 s target spacing, dir_A != dir_B)', true);
+  });
+  safe('per-cell table', function () {
+    var rows = '<tr><th>cell</th><th>condition</th><th>trials</th><th>A targets</th><th>B targets</th></tr>';
+    CFG.CELLS.forEach(function (c) {
+      var ct = trials.filter(function (t) { return t.cell === c.code; });
+      var sa = 0, sb = 0;
+      ct.forEach(function (t) { sa += t.n_tgt_A; sb += t.n_tgt_B; });
+      rows += '<tr><td>' + c.code + '</td><td>' + c.name + '</td><td>' + ct.length + '</td><td>' + sa + '</td><td>' + sb + '</td></tr>';
+    });
+    out.insertAdjacentHTML('beforeend', '<table>' + rows + '</table>');
+  });
+  safe('negative: assertTrialList catches a violation', function () {
+    var bad = JSON.parse(JSON.stringify(trials));
+    bad[0].dir_B = bad[0].dir_A;
+    var threw = false;
+    try { D.assertTrialList(bad); } catch (e) { threw = /dir_A == dir_B/.test(e.message); }
+    report('a trial list with dir_A == dir_B is REJECTED', threw);
+  });
+  safe('negative: spacing', function () {
+    var bad = JSON.parse(JSON.stringify(trials)), t = null;
+    for (var i = 0; i < bad.length; i++) { if (bad[i].n_tgt_A === 2) { t = bad[i]; break; } }
+    t.tgt_A_pulses = [D.eligiblePulses('A')[1], D.eligiblePulses('A')[2]];
+    var threw = false;
+    try { D.assertTrialList(bad); } catch (e) { threw = /ticks apart/.test(e.message); }
+    report('two targets closer than 1.0 s are REJECTED', threw);
+  });
+
+  /* ------------------------------------------------ 3. frequency plan */
+  head('3. Frequency plan &mdash; the integer-harmonic relationship');
+  safe('plan table', function () {
+    var rates = [60, 75, 85, 90, 100, 120, 144, 165, 180, 240];
+    var expectOk = { standard: [120, 240], fallback60: [60, 120, 180, 240] };
+    var rows = '<tr><th>plan</th><th>refresh</th><th>result</th><th>A flicker</th><th>A pulse</th><th>B flicker</th><th>B pulse</th></tr>';
+    var allMatch = true;
+    Object.keys(CFG.FREQ_PLANS).forEach(function (name) {
+      rates.forEach(function (R) {
+        var r = D.planCheck(name, R), p = r.plan;
+        var want = expectOk[name].indexOf(R) >= 0;
+        if (!!p !== want) { allMatch = false; }
+        rows += '<tr><td>' + name + '</td><td>' + R + ' Hz</td><td class="' + (p ? 'ok">OK' : 'bad">' +
+                r.errors[0].split(' ')[0]) + '</td>' +
+          (p ? '<td>' + p.A.flickerHz.toFixed(4) + ' Hz (' + p.A.flickerFrames + ' fr, ' + p.A.onFrames + ' on)</td>' +
+               '<td>' + p.A.pulseHz.toFixed(4) + ' Hz (' + p.A.pulseFrames + ' fr) &times;' + p.A.harmonic + '</td>' +
+               '<td>' + p.B.flickerHz.toFixed(4) + ' Hz (' + p.B.flickerFrames + ' fr, ' + p.B.onFrames + ' on)</td>' +
+               '<td>' + p.B.pulseHz.toFixed(4) + ' Hz (' + p.B.pulseFrames + ' fr) &times;' + p.B.harmonic + '</td>'
+             : '<td colspan="4" class="mut">' + r.errors[0] + '</td>') + '</tr>';
+      });
+    });
+    out.insertAdjacentHTML('beforeend', '<table>' + rows + '</table>');
+    report('plans are valid at exactly the expected refresh rates (standard: 120, 240; fallback60: 60, 120, 180, 240)', allMatch);
+  });
+  safe('standard @ 120 exact values', function () {
+    var p = D.frequencyPlan('standard', 120);
+    var ok = p.A.flickerFrames === 9 && p.A.pulseFrames === 36 && p.B.flickerFrames === 10 && p.B.pulseFrames === 30 &&
+             close(p.A.flickerHz, 40 / 3) && close(p.A.pulseHz, 10 / 3) && close(p.B.flickerHz, 12) && close(p.B.pulseHz, 4) &&
+             close(p.A.flickerHz, 4 * p.A.pulseHz) && close(p.B.flickerHz, 3 * p.B.pulseHz) &&
+             p.stimFrames === 720 && p.stimFrames % 36 === 0 && p.stimFrames % 30 === 0;
+    report('standard @ 120 Hz: A 9/36 frames = 13.333/3.333 Hz (x4), B 10/30 frames = 12/4 Hz (x3), 720-frame epoch', ok);
+    para('Shared harmonics (both arrays&rsquo; series, &le; ' + CFG.SHARED_HARMONIC_REPORT_MAX_HZ + ' Hz): ' +
+         p.sharedHarmonics.map(function (s) { return s.hz + ' Hz [' + s.label + ']'; }).join(', '));
+  });
+  safe('negative: 60 Hz', function () {
+    var r = D.planCheck('standard', 60);
+    report('standard plan is REFUSED at 60 Hz (R3: 13.33 Hz would need 4.5 frames/cycle)',
+           !r.plan && /^R3/.test(r.errors[0]), r.errors[0]);
+    var thrown = false;
+    try { D.frequencyPlan('standard', 60); } catch (e) { thrown = /FREQUENCY PLAN VIOLATION/.test(e.message); }
+    report('frequencyPlan() throws on that violation (this is what stops a session)', thrown);
+  });
+  safe('negative: declared/derived mismatch', function () {
+    CFG.FREQ_PLANS._test_mismatch = { harm: { A: 4, B: 3 }, flickerHz: { A: 13.33, B: 12 } };
+    var r = D.planCheck('_test_mismatch', 120);
+    delete CFG.FREQ_PLANS._test_mismatch;
+    report('a plan whose declared 13.33 Hz is not the exact 40/3 is REJECTED (R4)',
+           !r.plan && r.errors.some(function (e) { return /^R4/.test(e); }), r.errors[0]);
+  });
+  safe('negative: cross-array collision', function () {
+    CFG.FREQ_PLANS._test_collide = { harm: { A: 4, B: 5 }, flickerHz: { A: 40 / 3, B: 20 } };
+    var r = D.planCheck('_test_collide', 120);
+    delete CFG.FREQ_PLANS._test_collide;
+    report('a B flicker of 20 Hz (= 6 x A pulse) is REJECTED (R7)',
+           !r.plan && r.errors.some(function (e) { return /^R7/.test(e); }), r.errors[0]);
+  });
+
+  /* ------------------------------------------------ 3b. coherence settings (DECISION 28) */
+  head('3b. Coherence settings &mdash; validation and duty cycle');
+  /* [bg, tgt, duty, speed, burst speed, expected first rule or null];
+   * same cases as reference_design.py and verifyDesign.m */
+  var vcases = [
+    [50, 95, 50, 5, 5, null], [25, 55, 100 / 3, 5, 10, null], [0, 100, 1, 0.5, 40, null],
+    [-1, 80, 100, 5, 5, 'V2'], [60, 101, 100, 5, 5, 'V2'], [60, 80, 0, 5, 5, 'V3'], [60, 80, 120, 5, 5, 'V3'],
+    [80, 60, 100, 5, 5, 'V4'], [70, 70, 100, 5, 5, 'V4'], [NaN, 80, 100, 5, 5, 'V1'],
+    [50, 95, 50, 0, 5, 'V5'], [50, 95, 50, 5, 41, 'V5'], [50, 95, 50, 5, NaN, 'V1']
+  ];
+  safe('validation cases', function () {
+    var allOk = true, rows = [];
+    vcases.forEach(function (c) {
+      var e = D.validateStimParams({ cohBgPct: c[0], cohTgtPct: c[1], dutyPct: c[2],
+                                     speedDegS: c[3], burstSpeedDegS: c[4] });
+      var got = e.length ? e[0].slice(0, 2) : null;
+      if (got !== c[5]) { allOk = false; }
+      rows.push(c[0] + '/' + c[1] + '/' + (+c[2].toFixed(3)) + '/' + c[3] + '/' + c[4] + ' &rarr; ' + (got || 'ok'));
+    });
+    report('setup-screen validation accepts valid settings and rejects out-of-range, non-numeric, ' +
+           'target &le; background, and out-of-range speeds (13 cases)', allOk, rows.join(', '));
+  });
+  safe('defaults', function () {
+    report('defaults: background 50 %, target 95 %, duty 50 % (50 and 95 of 100 dots), speeds 5 / 5 &deg;/s, ' +
+           '40 cm viewing distance, 60 cm screen width',
+           CFG.COH_BG_PCT_DEFAULT === 50 && CFG.COH_TGT_PCT_DEFAULT === 95 && CFG.DUTY_PCT_DEFAULT === 50 &&
+           D.nCoherent(50, 100) === 50 && D.nCoherent(95, 100) === 95 &&
+           CFG.DOT_SPEED_DEG_S_DEFAULT === 5 && CFG.BURST_SPEED_DEG_S_DEFAULT === 5 &&
+           CFG.VIEW_DIST_CM_DEFAULT === 40 && CFG.SCREEN_WIDTH_CM_DEFAULT === 60);
+  });
+  safe('duty -> window', function () {
+    var want = [[100, 36, 30], [50, 18, 15], [100 / 3, 12, 10], [10, 4, 3]], ok = true, det = [];
+    want.forEach(function (w) {
+      var p = D.frequencyPlan('standard', 120, w[0]);
+      if (p.A.winFrames !== w[1] || p.B.winFrames !== w[2]) { ok = false; }
+      det.push((+w[0].toFixed(3)) + '% &rarr; A ' + p.A.winFrames + ', B ' + p.B.winFrames);
+    });
+    report('coherent window = duty x pulse period, nearest frame (standard @ 120 Hz)', ok, det.join('; '));
+    var r = D.planCheck('standard', 120, 1);
+    report('a duty cycle too short for one frame (1 % of 36 frames) is REFUSED (R9)',
+           !r.plan && r.errors.some(function (e) { return /^R9/.test(e); }), r.errors[0]);
+  });
+
+  /* ------------------------------------------------ 4. schedule + pips */
+  head('4. Stimulus schedule and pip train (standard @ 120 Hz)');
+  safe('continuous coherence', function () {
+    var p = D.frequencyPlan('standard', 120, 100), s = D.stimulusSchedule(p), inA = 0, inB = 0, f, lastB = 0;
+    for (f = 0; f < p.stimFrames; f++) { inA += s.A.pulse[f] >= 0 ? 1 : 0; inB += s.B.pulse[f] >= 0 ? 1 : 0; }
+    for (f = 0; f < p.stimFrames; f++) { if (s.B.pulse[f] === 23) { lastB++; } }
+    report('duty 100 %: every frame of A is coherent (720/720); B all but frames 0-1 before its first pulse ' +
+           '(718/720); the last B pulse is cut at the epoch end (28 of 30 frames)',
+           inA === 720 && inB === 718 && s.B.pulse[0] === -1 && s.B.pulse[1] === -1 && lastB === 28,
+           'A ' + inA + ', B ' + inB + ', last B pulse ' + lastB + ' frames');
+  });
+  safe('schedule', function () {
+    var p = D.frequencyPlan('standard', 120), s = D.stimulusSchedule(p);
+    var onA = 0, onB = 0, f;
+    for (f = 0; f < p.stimFrames; f++) { onA += s.A.on[f]; onB += s.B.on[f]; }
+    var firstA = Array.prototype.slice.call(s.A.on, 0, 18).join('');
+    var firstB = Array.prototype.slice.call(s.B.on, 0, 22).join('');
+    report('A on-frames 400/720 (5 of every 9), B 360/720 (5 of every 10)', onA === 400 && onB === 360,
+           'A ' + firstA + '&hellip;, B ' + firstB + '&hellip;');
+    report('20 A pulses every 36 frames from frame 0; 24 B pulses every 30 frames from frame 2',
+           s.A.onsetFrames.length === 20 && s.B.onsetFrames.length === 24 &&
+           s.A.onsetFrames[19] === 684 && s.B.onsetFrames[0] === 2 && s.B.onsetFrames[23] === 692);
+    report('every pulse starts on its own array\'s flicker ON edge (phase-locked)',
+           s.A.onsetFrames.every(function (o) { return s.A.on[o] === 1 && (o === 0 || s.A.on[o - 1] === 0); }) &&
+           s.B.onsetFrames.every(function (o) { return s.B.on[o] === 1 && s.B.on[o - 1] === 0; }));
+    var ifi = 1 / 120;
+    var pa = S.pipSchedule({ sound_match: 'A' }, s, ifi), pb = S.pipSchedule({ sound_match: 'B' }, s, ifi);
+    var pn = S.pipSchedule({ sound_match: 'none' }, s, ifi);
+    report('pips: 20 locked to A (every 0.300 s), 24 locked to B (every 0.250 s), none in silent trials',
+           pa.length === 20 && pb.length === 24 && pn.length === 0 &&
+           close(pa[1].t_s - pa[0].t_s, 0.3) && close(pb[1].t_s - pb[0].t_s, 0.25));
+    var smp = S.pipTrainSamples(pa.slice(0, 1), 0.1, 48000), peak = 0;
+    for (f = 0; f < smp.length; f++) { peak = Math.max(peak, Math.abs(smp[f])); }
+    report('pip waveform: ' + CFG.PIP_FREQ_HZ + ' Hz, ' + (CFG.PIP_DUR_S * 1000) + ' ms, peak ' + CFG.PIP_AMPLITUDE,
+           Math.abs(peak - CFG.PIP_AMPLITUDE) < 0.005 && smp[0] === 0, 'measured peak ' + peak.toFixed(4));
+  });
+
+  /* ------------------------------------------------ 5. dots */
+  head('5. Dot precomputation (trial 1, synthetic geometry)');
+  safe('dots', function () {
+    var p = D.frequencyPlan('standard', 120), s = D.stimulusSchedule(p);
+    var geom = S.makeGeometry(0.027, 60, 1 / 120);
+    var t0 = performance.now();
+    var d = S.precomputeDots(trials[0], p, s, geom);
+    var ms = performance.now() - t0, R = geom.apertureRadiusPx, worst = 0;
+    for (var i = 0; i < d.x.length; i++) { worst = Math.max(worst, Math.sqrt(d.x[i] * d.x[i] + d.y[i] * d.y[i])); }
+    report('all ' + d.x.length + ' positions inside the ' + R.toFixed(1) + ' px aperture', worst <= R + 1e-9,
+           'max radius ' + worst.toFixed(2) + ' px; precompute took ' + ms.toFixed(0) + ' ms');
+    var seen = {};
+    for (i = 0; i < d.drawOrder.length; i++) { seen[d.drawOrder[i]] = 1; }
+    report('draw order is a permutation of all ' + d.nTot + ' dots', Object.keys(seen).length === d.nTot);
+  });
+  safe('coherent fraction', function () {
+    /* count A dots whose step on one frame is exactly the array's coherent step;
+     * dots respawned on that frame can only lower the count */
+    /* defaults (50 / 95 %, duty 50 %) but a burst speed of 10 deg/s, so the
+     * two speeds are told apart */
+    var sp = D.defaultStimParams();
+    sp.burstSpeedDegS = 10;
+    var p = D.frequencyPlan('standard', 120, sp.dutyPct), s = D.stimulusSchedule(p);
+    var geom = S.makeGeometry(0.027, 60, 1 / 120, sp), t = null, i;
+    for (i = 0; i < trials.length; i++) { if (trials[i].n_tgt_A > 0) { t = trials[i]; break; } }
+    var d = S.precomputeDots(t, p, s, geom, sp), N = d.nPerArray;
+    var ang = CFG.DIR_ANGLE_DEG[t.dir_A] * Math.PI / 180;
+    function nCoh(f, stepPx) {
+      var n = 0, cdx = stepPx * Math.cos(ang), cdy = -stepPx * Math.sin(ang);
+      for (var j = 0; j < N; j++) {
+        var dx = d.x[f * d.nTot + j] - d.x[(f - 1) * d.nTot + j], dy = d.y[f * d.nTot + j] - d.y[(f - 1) * d.nTot + j];
+        if (Math.abs(dx - cdx) < 1e-6 && Math.abs(dy - cdy) < 1e-6) { n++; }
+      }
+      return n;
+    }
+    var kT = t.tgt_A_pulses[0], kB = kT - 1, vN = geom.speedPxPerFrame, vB = geom.burstSpeedPxPerFrame;
+    var inT = s.A.onsetFrames[kT] + 10, inB = s.A.onsetFrames[kB] + 10;     // inside the 18-frame window
+    var outB = s.A.onsetFrames[kB] + 25;                                     // after it (duty 50 %)
+    var nT = nCoh(inT, vB), nTslow = nCoh(inT, vN), nB = nCoh(inB, vN), nOut = nCoh(outB, vN) + nCoh(outB, vB);
+    report('trial ' + t.trial + ', duty 50 %: inside a target pulse 95 of 100 A dots move coherently at the BURST ' +
+           'speed (none at the normal speed); inside a background pulse 50 at the normal speed; after the ' +
+           'window, none',
+           nT <= 95 && nT >= 88 && nTslow === 0 && nB <= 50 && nB >= 45 && nOut === 0,
+           'target pulse ' + kT + ': ' + nT + ' at burst, ' + nTslow + ' at normal; background pulse ' + kB + ': ' +
+           nB + '; after window: ' + nOut + ' (respawns can lower the first two by a few)');
+  });
+
+  /* ------------------------------------------------ 6. scoring */
+  head('6. Response scoring (same cases as reference_design.py and verifyDesign.m)');
+  var cases = [
+    ['both: two hits', 'both', [['A', 1.2], ['B', 2.5]], [1.6, 2.9], 'hit|hit', 'hit|hit', '2,0,0,0,0'],
+    ['attend A: B response', 'A', [['A', 1.2], ['B', 2.5]], [1.6, 3.0], 'hit|unattended_responded', 'hit|fa_unattended', '1,0,0,1,0'],
+    ['attend B: early + none', 'B', [['A', 1.2]], [0.5, 1.3], 'unattended_ignored', 'fa|fa', '0,0,2,0,0'],
+    ['both: double press', 'both', [['A', 2.4]], [2.8, 2.9], 'hit', 'hit|extra', '1,0,0,0,1'],
+    ['both: too late = miss', 'both', [['A', 1.2]], [2.2], 'miss', 'fa', '0,1,1,0,0'],
+    ['attend A: A missed', 'A', [['A', 1.2], ['B', 3.0]], [], 'miss|unattended_ignored', '', '0,1,0,0,0']
+  ];
+  cases.forEach(function (c) {
+    safe(c[0], function () {
+      var tg = c[2].map(function (t, i) { return { arr: t[0], pulse: i, onset_s: t[1] }; });
+      var r = D.scoreTrial(tg, c[1], c[3]), s = r.summary;
+      var got = [r.targetOutcomes.join('|'), r.responseOutcomes.join('|'),
+                 [s.n_hits, s.n_misses, s.n_fa, s.n_fa_unattended, s.n_extra].join(',')];
+      report(c[0], got[0] === c[4] && got[1] === c[5] && got[2] === c[6], got.join(' ; '));
+    });
+  });
+
+  var sum = document.getElementById('summary');
+  sum.innerHTML = nFail === 0
+    ? '<span class="ok">ALL ' + nPass + ' CHECKS PASSED</span>'
+    : '<span class="bad">' + nFail + ' FAILED</span>, ' + nPass + ' passed &mdash; do not run participants';
+  sum.style.borderColor = nFail === 0 ? 'var(--ok)' : 'var(--bad)';
+})();
+</script>
+</body>
+</html>
