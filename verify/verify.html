@@ -243,6 +243,28 @@
     report('pips: 20 locked to A (every 0.300 s), 24 locked to B (every 0.250 s), none in silent trials',
            pa.length === 20 && pb.length === 24 && pn.length === 0 &&
            close(pa[1].t_s - pa[0].t_s, 0.3) && close(pb[1].t_s - pb[0].t_s, 0.25));
+    /* sound preview (DECISION 30) */
+    var pf = (CFG.CUE_TICKS + CFG.GAP_TICKS) * p.framesPerTick;
+    var qa = S.previewPipSchedule({ sound_match: 'A' }, s, ifi, pf), qb = S.previewPipSchedule({ sound_match: 'B' }, s, ifi, pf);
+    var qn = S.previewPipSchedule({ sound_match: 'none' }, s, ifi, pf);
+    report('sound preview: cue + gap = 1.5 s holds whole periods of both arrays (P1)', D.previewCheck().length === 0,
+           D.previewCheck().join('; '));
+    report('preview pips: 5 for A from cue onset (-1.500 s), 6 for B (-1.483 s), none in silent trials; ' +
+           'each train continues into the stimulus pips one period later, without a gap',
+           qa.length === 5 && qb.length === 6 && qn.length === 0 &&
+           close(qa[0].t_s, -1.5) && close(qb[0].t_s, -1.5 + 2 / 120) &&
+           close(qa[4].t_s + 0.3, pa[0].t_s) && close(qb[5].t_s + 0.25, pb[0].t_s),
+           'A ' + qa.map(function (q) { return q.t_s.toFixed(3); }).join(' ') + ' | B ' +
+           qb.map(function (q) { return q.t_s.toFixed(3); }).join(' '));
+    /* the preview is its own buffer (main.js::runTrial): exactly cue + gap
+     * long, started at cue onset and stopped at stimulus onset */
+    var lead = pf * ifi, pb2 = S.pipTrainSamples(qa, lead, 48000, lead), firstNz = -1, lastNz = -1;
+    for (f = 0; f < pb2.length; f++) { if (pb2[f] !== 0) { if (firstNz < 0) { firstNz = f; } lastNz = f; } }
+    report('preview buffer is separate and exactly cue + gap long (1.5 s): its first pip starts at cue onset and ' +
+           'its last pip ends before stimulus onset, so it cannot sound during the dots',
+           pb2.length === Math.round(1.5 * 48000) && firstNz >= 0 && firstNz <= 1 && lastNz < pb2.length - 0.2 * 48000,
+           'length ' + pb2.length + ' samples; first non-zero ' + firstNz + ', last non-zero ' + lastNz +
+           ' (' + ((pb2.length - lastNz) / 48).toFixed(1) + ' ms of silence before stimulus onset)');
     var smp = S.pipTrainSamples(pa.slice(0, 1), 0.1, 48000), peak = 0;
     for (f = 0; f < smp.length; f++) { peak = Math.max(peak, Math.abs(smp[f])); }
     report('pip waveform: ' + CFG.PIP_FREQ_HZ + ' Hz, ' + (CFG.PIP_DUR_S * 1000) + ' ms, peak ' + CFG.PIP_AMPLITUDE,

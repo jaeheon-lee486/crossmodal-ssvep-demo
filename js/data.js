@@ -18,7 +18,7 @@
     'pid', 'participant', 'platform', 'practice', 'seed', 'color_map', 'color_A', 'color_B',
     'freq_plan', 'refresh_nominal_hz', 'refresh_measured_hz',
     'coh_bg_pct', 'coh_tgt_pct', 'duty_pct', 'win_frames_A', 'win_frames_B',
-    'speed_deg_s', 'burst_speed_deg_s', 'view_dist_cm', 'screen_width_cm',
+    'speed_deg_s', 'burst_speed_deg_s', 'view_dist_cm', 'screen_width_cm', 'preview_sound',
     'trial', 'block', 'trial_in_block', 'cell', 'cond', 'attend', 'cue', 'sound_match',
     'dir_A', 'dir_B', 'dir_A_name', 'dir_B_name',
     'n_tgt_A', 'n_tgt_B', 'tgt_A_pulses', 'tgt_B_pulses', 'tgt_A_onset_s', 'tgt_B_onset_s',
@@ -27,7 +27,7 @@
     'flicker_hz_A', 'flicker_hz_B', 'pulse_hz_A', 'pulse_hz_B',
     'n_frames', 'n_dropped', 'max_frame_interval_ms',
     't_cue_onset', 't_stim_onset', 't_stim_offset',
-    'n_pips', 'audio_start_sched', 'av_offset_est_s',
+    'n_pips', 'n_preview_pips', 'audio_start_sched', 'av_offset_est_s',
     'iti_s', 'place_attempts', 'dot_seed', 'aborted'
   ];
 

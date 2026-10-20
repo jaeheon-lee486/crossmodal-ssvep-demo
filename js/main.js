@@ -229,20 +229,47 @@
 
     /* everything heavy happens before the ITI starts */
     var dots = S.precomputeDots(trial, plan, sched, geom, stimParams);
-    var pips = S.pipSchedule(trial, sched, ifi);
+    var allPips = S.pipSchedule(trial, sched, ifi);
+    /* sound preview (DECISION 30): sound trials only, pip train from cue onset */
+    var nIti = trial.iti_ticks * fpt, nCue = CFG.CUE_TICKS * fpt, nGap = CFG.GAP_TICKS * fpt;
+    /* Preview mode: the pips play ONLY during cue + gap, from their own
+     * buffer (exactly cue + gap long, sample 0 = cue onset, stopped at
+     * stimulus onset); the stimulus period is SILENT. Without the preview,
+     * the pips play during the stimulus as usual. */
+    var preview = !!(stimParams.previewSound && allPips.length);
+    var pips = preview ? [] : allPips;                   // stimulus-period pips
     var buffer = pips.length ? S.makePipBuffer(audioCtx, pips, nF * ifi + 0.5) : null;
+    var prevPips = preview ? S.previewPipSchedule(trial, sched, ifi, nCue + nGap) : [];
+    var leadS = (nCue + nGap) * ifi;                    // cue onset -> stimulus onset
+    var prevBuffer = preview ? S.makePipBuffer(audioCtx, prevPips, leadS, leadS) : null;
 
     var row = {}, events = [];
+    var src = null, prevSrc = null, plannedOnset = NaN, audioStartCtx = NaN, prevPlannedOnset = NaN;
+    var stopAll = function () { if (src) { src.stop(); } if (prevSrc) { prevSrc.stop(); } };
 
-    await runFrames(trial.iti_ticks * fpt, function () { drawFixation(); });
-    if (aborted) { return null; }
+    /* with a preview, the preview buffer is scheduled on the FIRST ITI frame
+     * for the moment the first cue frame is expected on screen (>= 1.0 s of
+     * lead time), and told to stop at the expected stimulus onset */
+    await runFrames(nIti, function (f, t) {
+      drawFixation();
+      if (f === 0 && prevBuffer) {
+        var cueCtx = ctxTimeForPerf(t + nIti * ifi + lag);
+        prevPlannedOnset = t + (nIti + nCue + nGap) * ifi + lag;
+        prevSrc = audioCtx.createBufferSource();
+        prevSrc.buffer = prevBuffer;
+        prevSrc.connect(audioCtx.destination);
+        prevSrc.start(Math.max(cueCtx, audioCtx.currentTime));
+        prevSrc.stop(cueCtx + leadS);
+      }
+    });
+    if (aborted) { stopAll(); return null; }
 
-    var cueRes = await runFrames(CFG.CUE_TICKS * fpt, function () { drawCue(trial.attend); });
-    if (aborted) { return null; }
+    var cueRes = await runFrames(nCue, function () { drawCue(trial.attend); });
+    if (aborted) { stopAll(); return null; }
 
-    /* the pip train is scheduled on the FIRST gap frame, for the moment the
-     * first stimulus frame is expected on screen -- 0.5 s of lead time */
-    var nGap = CFG.GAP_TICKS * fpt, src = null, plannedOnset = NaN, audioStartCtx = NaN;
+    /* the stimulus pip train is scheduled on the FIRST gap frame, for the
+     * moment the first stimulus frame is expected on screen -- 0.5 s of lead
+     * time (the same with and without a preview) */
     await runFrames(nGap, function (f, t) {
       drawFixation();
       if (f === 0 && buffer) {
@@ -254,7 +281,7 @@
         src.start(Math.max(audioStartCtx, audioCtx.currentTime));
       }
     });
-    if (aborted) { if (src) { src.stop(); } return null; }
+    if (aborted) { stopAll(); return null; }
 
     var presses = [];
     var off = onKey(function (code, t, rep) {
@@ -297,6 +324,15 @@
           outcome: ti >= 0 ? sc.targetOutcomes[ti] : ''
         }));
       });
+    });
+    /* preview pips (t_sched_s negative) come from their own buffer, so their
+     * offset is estimated from the preview buffer's own schedule */
+    var prevAvOffset = prevBuffer ? prevPlannedOnset - tOn : NaN;
+    prevPips.forEach(function (p) {
+      events.push(Object.assign({}, base, {
+        event: 'pip_preview', array: trial.sound_match, index: p.pulse, is_target: '', target_pulse: '',
+        frame: p.frame, t_sched_s: p.t_s, t_actual_s: p.t_s + prevAvOffset, t_peak_s: '', rt_s: '', outcome: ''
+      }));
     });
     pips.forEach(function (p) {
       events.push(Object.assign({}, base, {
@@ -347,7 +383,8 @@
       n_frames: res.n, n_dropped: res.dropped, max_frame_interval_ms: res.maxInt * 1000,
       t_cue_onset: cueRes.times[0], t_stim_onset: tOn,
       t_stim_offset: res.times[res.n - 1] + ifi + lag,
-      n_pips: pips.length, audio_start_sched: audioStartCtx, av_offset_est_s: avOffset,
+      n_pips: pips.length, n_preview_pips: prevPips.length,
+      audio_start_sched: audioStartCtx, av_offset_est_s: avOffset,
       iti_s: trial.iti_ticks / CFG.GRID_HZ, place_attempts: trial.place_attempts,
       dot_seed: trial.dot_seed, aborted: res.aborted ? 1 : 0
     });
@@ -468,6 +505,7 @@
       freq_plan: plan.name, refresh_nominal_hz: refresh.nominal, refresh_measured_hz: refresh.measured,
       coh_bg_pct: stimParams.cohBgPct, coh_tgt_pct: stimParams.cohTgtPct, duty_pct: stimParams.dutyPct,
       speed_deg_s: stimParams.speedDegS, burst_speed_deg_s: stimParams.burstSpeedDegS,
+      preview_sound: stimParams.previewSound ? 1 : 0,
       view_dist_cm: form.distCm, screen_width_cm: form.widthCm,
       win_frames_A: plan.A.winFrames, win_frames_B: plan.B.winFrames
     };
@@ -490,6 +528,10 @@
       '<tr><td>dot speed</td><td>normal ' + stimParams.speedDegS + ' &deg;/s, burst (target) ' +
         stimParams.burstSpeedDegS + ' &deg;/s</td></tr>' +
       '<tr><td>geometry</td><td>' + form.distCm + ' cm viewing distance, ' + form.widthCm + ' cm screen width</td></tr>' +
+      '<tr><td>sound preview</td><td>' + (stimParams.previewSound
+        ? 'ON &mdash; sound trials: pips only during cue + gap, dots silent (cue + gap = ' +
+          ((CFG.CUE_TICKS + CFG.GAP_TICKS) / CFG.GRID_HZ).toFixed(1) + ' s)'
+        : 'off') + '</td></tr>' +
       '<tr><td>audio</td><td>' + audioCtx.sampleRate + ' Hz</td></tr></table>',
       'Experimenter: press SPACE to continue, ESC to abort');
 
@@ -564,6 +606,7 @@
     el('dutyPct').value = CFG.DUTY_PCT_DEFAULT;
     el('speedDegS').value = CFG.DOT_SPEED_DEG_S_DEFAULT;
     el('burstSpeedDegS').value = CFG.BURST_SPEED_DEG_S_DEFAULT;
+    el('previewSound').checked = CFG.PREVIEW_SOUND_DEFAULT;
 
     el('participant').addEventListener('input', function () {
       var n = parseInt(el('participant').value, 10);
@@ -584,7 +627,8 @@
         distCm: parseFloat(el('distCm').value),
         widthCm: parseFloat(el('widthCm').value),
         stim: { cohBgPct: pctField('cohBgPct'), cohTgtPct: pctField('cohTgtPct'), dutyPct: pctField('dutyPct'),
-                speedDegS: pctField('speedDegS'), burstSpeedDegS: pctField('burstSpeedDegS') }
+                speedDegS: pctField('speedDegS'), burstSpeedDegS: pctField('burstSpeedDegS'),
+                previewSound: el('previewSound').checked }
       };
       var err = '';
       if (isNaN(n) || n < 0) { err = 'Enter a participant number (0 or more).'; }
@@ -593,6 +637,7 @@
       else if (isNaN(form.seed)) { err = 'Seed must be a number.'; }
       else {
         var verr = D.validateStimParams(form.stim);
+        if (form.stim.previewSound) { verr = verr.concat(D.previewCheck()); }
         if (verr.length) { err = 'Invalid stimulus settings: ' + verr.join('; '); }
       }
       if (err) { el('formErr').textContent = err; return; }

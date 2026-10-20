@@ -15,7 +15,7 @@
   'use strict';
 
   var CONFIG = {
-    PARITY_ID: 'XM-PARAM-2026-10-20b',
+    PARITY_ID: 'XM-PARAM-2026-10-20e',
 
     /* ------------------------------------------------------ display */
     BG_COLOR: [0, 0, 0],
@@ -128,6 +128,8 @@
     PIP_RAMP_S: 0.005,                // raised-cosine on and off
     PIP_AMPLITUDE: 0.1,               // digital; ~ -20 dBFS. Calibrate SPL.
     PIP_OFFSET_S: 0.0,                // pip onset relative to pulse onset
+    PREVIEW_SOUND_DEFAULT: false,     // setup toggle (DECISION 30): in sound trials, start the pip
+                                      //   train at cue onset, i.e. across cue + gap (1.5 s)
     WEB_DISPLAY_LAG_FRAMES: 1,        // web only: rAF timestamp -> photons estimate
 
     /* ------------------------------------------------------ keys */

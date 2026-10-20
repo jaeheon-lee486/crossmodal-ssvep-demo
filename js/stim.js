@@ -151,13 +151,30 @@
     return out;
   }
 
+  /* Preview pips (DECISION 30): the matched array's pulse grid shifted back by
+   * the preview span (cue + gap, previewFrames frames), for every pulse that
+   * starts within the first previewFrames frames of the stimulus. Times are
+   * relative to stimulus onset, so they are NEGATIVE; the last preview pip is
+   * one pulse period before the first stimulus pip. */
+  function previewPipSchedule(trial, sched, ifi, previewFrames) {
+    if (trial.sound_match === 'none' || !(previewFrames > 0)) { return []; }
+    var on = sched[trial.sound_match].onsetFrames, out = [];
+    for (var k = 0; k < on.length && on[k] < previewFrames; k++) {
+      var fr = on[k] - previewFrames;
+      out.push({ pulse: k, frame: fr, t_s: fr * ifi + CFG.PIP_OFFSET_S });
+    }
+    return out;
+  }
+
   /* Samples of one pip train, raised-cosine ramps; same formula as
-   * +cmcomp/makePipTrain.m. Returns a Float32Array. */
-  function pipTrainSamples(pips, durS, fs) {
+   * +cmcomp/makePipTrain.m. Sample 0 is at stimulus onset - leadS (leadS > 0
+   * when a preview is played, else 0). Returns a Float32Array. */
+  function pipTrainSamples(pips, durS, fs, leadS) {
+    var lead = leadS || 0;
     var nS = Math.round(durS * fs), out = new Float32Array(nS);
     var nP = Math.round(CFG.PIP_DUR_S * fs), nR = Math.round(CFG.PIP_RAMP_S * fs);
     for (var p = 0; p < pips.length; p++) {
-      var s0 = Math.round(pips[p].t_s * fs);
+      var s0 = Math.round((pips[p].t_s + lead) * fs);
       for (var j = 0; j < nP; j++) {
         var s = s0 + j;
         if (s < 0 || s >= nS) { continue; }
@@ -170,9 +187,9 @@
     return out;
   }
 
-  function makePipBuffer(audioCtx, pips, durS) {
+  function makePipBuffer(audioCtx, pips, durS, leadS) {
     var fs = audioCtx.sampleRate;
-    var data = pipTrainSamples(pips, durS, fs);
+    var data = pipTrainSamples(pips, durS, fs, leadS);
     var buf = audioCtx.createBuffer(2, data.length, fs);
     buf.getChannelData(0).set(data);
     buf.getChannelData(1).set(data);
@@ -183,6 +200,7 @@
     makeGeometry: makeGeometry,
     precomputeDots: precomputeDots,
     pipSchedule: pipSchedule,
+    previewPipSchedule: previewPipSchedule,
     pipTrainSamples: pipTrainSamples,
     makePipBuffer: makePipBuffer
   };

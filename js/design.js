@@ -320,7 +320,8 @@
 
   function defaultStimParams() {
     return { cohBgPct: CFG.COH_BG_PCT_DEFAULT, cohTgtPct: CFG.COH_TGT_PCT_DEFAULT, dutyPct: CFG.DUTY_PCT_DEFAULT,
-             speedDegS: CFG.DOT_SPEED_DEG_S_DEFAULT, burstSpeedDegS: CFG.BURST_SPEED_DEG_S_DEFAULT };
+             speedDegS: CFG.DOT_SPEED_DEG_S_DEFAULT, burstSpeedDegS: CFG.BURST_SPEED_DEG_S_DEFAULT,
+             previewSound: CFG.PREVIEW_SOUND_DEFAULT };
   }
 
   /* Setup-screen check of the five session-adjustable stimulus values
@@ -478,6 +479,21 @@
     return r.plan;
   }
 
+  /* Sound preview (DECISION 30): the pip train starts at cue onset and runs
+   * across cue + gap, which must hold whole pulse periods of both arrays so
+   * the rhythm continues seamlessly into the stimulus. Returns errors; [] = ok.
+   * Mirrors preview_check and +cmcore/previewCheck.m. */
+  function previewCheck() {
+    var span = CFG.CUE_TICKS + CFG.GAP_TICKS, errs = [];
+    ARRAYS.forEach(function (a) {
+      if (span % CFG.PULSE_PERIOD_TICKS[a] !== 0) {
+        errs.push('P1 cue + gap (' + span + ' ticks) is not a whole number of array ' + a +
+                  ' pulse periods (' + CFG.PULSE_PERIOD_TICKS[a] + ' ticks)');
+      }
+    });
+    return errs;
+  }
+
   /* Per-frame flicker state and pulse membership. Identical on every trial:
    * phases are fixed relative to stimulus onset (DECISION 6). pulse[f] = k
    * while frame f is in pulse k's coherent window (frames o .. o + winFrames
@@ -580,6 +596,7 @@
     validateStimParams: validateStimParams,
     planCheck: planCheck,
     frequencyPlan: frequencyPlan,
+    previewCheck: previewCheck,
     stimulusSchedule: stimulusSchedule,
     scoreTrial: scoreTrial
   };

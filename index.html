@@ -64,6 +64,10 @@
       <label for="burstSpeedDegS">Burst (target) dot speed (&deg;/s)</label>
       <input id="burstSpeedDegS" type="number" min="0" max="40" step="any" autocomplete="off">
     </div>
+    <div class="row">
+      <label for="previewSound">Sound preview (cue + gap)</label>
+      <input id="previewSound" type="checkbox">
+    </div>
 
     <p class="note">
       Colour map and seed fill in from the participant number (map = number mod&nbsp;2,
@@ -78,6 +82,9 @@
       100&nbsp;= continuous. Speeds: normal applies to every dot except the coherent dots of a
       target pulse, which move at the burst speed (two independent values, 0&ndash;40&nbsp;&deg;/s).
       Defaults 50&nbsp;% / 95&nbsp;% / 50&nbsp;%, 5 / 5&nbsp;&deg;/s (DESIGN_LOG.md, DECISIONS 28&ndash;29).
+      Sound preview (default off): in sound trials only, the pips play during cue + gap
+      (1.5&nbsp;s) and stop when the dots appear &mdash; the dots are then silent. Off: pips play
+      during the dots as usual. Trial timing is unchanged either way.
       All of these are saved with the data.
     </p>
 
@@ -104,11 +111,11 @@
 <canvas id="stage" style="display:none"></canvas>
 <div id="overlay" style="display:none"></div>
 
-<script src="js/config.js"></script>
-<script src="js/rng.js"></script>
-<script src="js/design.js"></script>
-<script src="js/stim.js"></script>
-<script src="js/data.js"></script>
-<script src="js/main.js"></script>
+<script src="js/config.js?v=2026-10-20e"></script>
+<script src="js/rng.js?v=2026-10-20e"></script>
+<script src="js/design.js?v=2026-10-20e"></script>
+<script src="js/stim.js?v=2026-10-20e"></script>
+<script src="js/data.js?v=2026-10-20e"></script>
+<script src="js/main.js?v=2026-10-20e"></script>
 </body>
 </html>
