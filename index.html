@@ -49,7 +49,7 @@
       <input id="cohBgPct" type="number" min="0" max="100" step="any" autocomplete="off">
     </div>
     <div class="row">
-      <label for="cohTgtPct">Target coherence (%)</label>
+      <label for="cohTgtPct">Deviant-event coherence (%)</label>
       <input id="cohTgtPct" type="number" min="0" max="100" step="any" autocomplete="off">
     </div>
     <div class="row">
@@ -61,12 +61,37 @@
       <input id="speedDegS" type="number" min="0" max="40" step="any" autocomplete="off">
     </div>
     <div class="row">
-      <label for="burstSpeedDegS">Burst (target) dot speed (&deg;/s)</label>
+      <label for="burstSpeedDegS">Deviant-event dot speed (&deg;/s)</label>
       <input id="burstSpeedDegS" type="number" min="0" max="40" step="any" autocomplete="off">
     </div>
     <div class="row">
-      <label for="previewSound">Sound preview (cue + gap)</label>
-      <input id="previewSound" type="checkbox">
+      <label for="lumDipPct">Deviant-event luminance dip (%, 0 = off)</label>
+      <input id="lumDipPct" type="number" min="0" max="100" step="any" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="tiltDeg">Deviant-event tilt (&plusmn;&deg;, 0 = off)</label>
+      <input id="tiltDeg" type="number" min="0" max="90" step="any" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="resetMotion">Reset motion after each coherent window</label>
+      <input id="resetMotion" type="checkbox">
+    </div>
+    <div class="row">
+      <label for="burstPct0">Trials with 0 / 1 / 2 / 3 bursts (%)</label>
+      <span class="quad">
+        <input id="burstPct0" type="number" min="0" max="100" step="any" autocomplete="off" aria-label="% of trials with 0 bursts">
+        <input id="burstPct1" type="number" min="0" max="100" step="any" autocomplete="off" aria-label="% of trials with 1 burst">
+        <input id="burstPct2" type="number" min="0" max="100" step="any" autocomplete="off" aria-label="% of trials with 2 bursts">
+        <input id="burstPct3" type="number" min="0" max="100" step="any" autocomplete="off" aria-label="% of trials with 3 bursts">
+      </span>
+    </div>
+    <div class="row">
+      <label for="nOneBlocks">Attend-one blocks (of 20)</label>
+      <input id="nOneBlocks" type="number" min="0" max="20" step="1" autocomplete="off">
+    </div>
+    <div class="row">
+      <label for="soundOnPct">Sound-on trials in attend-both blocks (%)</label>
+      <input id="soundOnPct" type="number" min="0" max="100" step="any" autocomplete="off">
     </div>
 
     <p class="note">
@@ -77,21 +102,35 @@
       if the measured refresh cannot carry the chosen frequency plan.
     </p>
     <p class="note">
-      Coherence: % of each colour's dots moving together during a background pulse and during a
-      target pulse (target must be higher). Duty cycle: % of each pulse period that is coherent;
-      100&nbsp;= continuous. Speeds: normal applies to every dot except the coherent dots of a
-      target pulse, which move at the burst speed (two independent values, 0&ndash;40&nbsp;&deg;/s).
-      Defaults 50&nbsp;% / 95&nbsp;% / 50&nbsp;%, 5 / 5&nbsp;&deg;/s (DESIGN_LOG.md, DECISIONS 28&ndash;29).
-      Sound preview (default off): in sound trials only, the pips play during cue + gap
-      (1.5&nbsp;s) and stop when the dots appear &mdash; the dots are then silent. Off: pips play
-      during the dots as usual. Trial timing is unchanged either way.
+      Coherence: % of each colour's dots moving together during a background pulse. Duty cycle:
+      % of each pulse period that is coherent; 100&nbsp;= continuous. Normal speed applies to every
+      dot except the coherent dots of a deviant event. Defaults 50&nbsp;% / 50&nbsp;% /
+      5&nbsp;&deg;/s (DESIGN_LOG.md, DECISIONS 28&ndash;29).
+    </p>
+    <p class="note">
+      Deviant event (target pulse, DECISION 38): four independent layers, all applied together
+      on the same event. Coherence (not below the background) and dot speed (0&ndash;40&nbsp;&deg;/s)
+      of its coherent dots &mdash; set them equal to the background values and the event is not
+      distinguishable by motion; luminance dip of that colour's dots (linear-light %, 0&nbsp;= off);
+      tilt of its coherent direction by &plusmn;the angle, random sign per event (0&nbsp;= off). At
+      least one layer must differ from the background. Defaults 95&nbsp;%, 5&nbsp;&deg;/s, 0, 0.
+      Reset motion (default off, DECISION 33): at the end of every coherent window the coherent
+      dots jump back by the distance they swept.
+    </p>
+    <p class="note">
+      Blocks (DECISION 35): 20 blocks of 20 trials in random order. Attend-one blocks have only red-
+      and blue-cue trials (half each) and never any sound; attend-both blocks have only the
+      red-and-blue cue, with sound on the set % of trials, split evenly between sound matched to
+      the red and to the blue array. Bursts per trial (DECISION 34): the four % must add up to 100;
+      defaults 0 / 90 / 10 / 0; all bursts of a trial are in one colour, the cued one in
+      attend-one blocks (DECISION 37). Sound plays only while the dots are on screen.
       All of these are saved with the data.
     </p>
 
     <ul class="facts">
       <li>Design: <span id="cfgTrials"></span></li>
       <li>Red and blue dot arrays, one aperture; flicker 13.33 / 12 Hz, coherence pulses 3.33 / 4 Hz</li>
-      <li>Task: press SPACE for stronger coherent sweeps (targets) in the cued colour(s)</li>
+      <li>Task: press SPACE for deviant events in the cued colour(s)</li>
     </ul>
 
     <p class="warn">
@@ -111,11 +150,11 @@
 <canvas id="stage" style="display:none"></canvas>
 <div id="overlay" style="display:none"></div>
 
-<script src="js/config.js?v=2026-10-20e"></script>
-<script src="js/rng.js?v=2026-10-20e"></script>
-<script src="js/design.js?v=2026-10-20e"></script>
-<script src="js/stim.js?v=2026-10-20e"></script>
-<script src="js/data.js?v=2026-10-20e"></script>
-<script src="js/main.js?v=2026-10-20e"></script>
+<script src="js/config.js?v=2026-10-21b"></script>
+<script src="js/rng.js?v=2026-10-21b"></script>
+<script src="js/design.js?v=2026-10-21b"></script>
+<script src="js/stim.js?v=2026-10-21b"></script>
+<script src="js/data.js?v=2026-10-21b"></script>
+<script src="js/main.js?v=2026-10-21b"></script>
 </body>
 </html>

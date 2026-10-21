@@ -9,7 +9,7 @@
  *   session.json : config snapshot, frequency plan, display measurement
  *
  * trials + events are autosaved to localStorage after every trial; frames are
- * too large for localStorage (~170k rows) and live in memory until download.
+ * too large for localStorage (~216k rows) and live in memory until download.
  * =========================================================================== */
 (function (root) {
   'use strict';
@@ -18,16 +18,18 @@
     'pid', 'participant', 'platform', 'practice', 'seed', 'color_map', 'color_A', 'color_B',
     'freq_plan', 'refresh_nominal_hz', 'refresh_measured_hz',
     'coh_bg_pct', 'coh_tgt_pct', 'duty_pct', 'win_frames_A', 'win_frames_B',
-    'speed_deg_s', 'burst_speed_deg_s', 'view_dist_cm', 'screen_width_cm', 'preview_sound',
-    'trial', 'block', 'trial_in_block', 'cell', 'cond', 'attend', 'cue', 'sound_match',
+    'speed_deg_s', 'burst_speed_deg_s', 'lum_dip_pct', 'tilt_deg', 'reset_motion',
+    'view_dist_cm', 'screen_width_cm', 'burst_pct', 'n_one_blocks', 'sound_on_pct',
+    'trial', 'block', 'block_type', 'trial_in_block', 'cell', 'cond', 'attend', 'cue', 'sound_match',
     'dir_A', 'dir_B', 'dir_A_name', 'dir_B_name',
-    'n_tgt_A', 'n_tgt_B', 'tgt_A_pulses', 'tgt_B_pulses', 'tgt_A_onset_s', 'tgt_B_onset_s',
+    'n_tgt', 'n_tgt_A', 'n_tgt_B', 'tgt_A_pulses', 'tgt_B_pulses', 'tgt_A_onset_s', 'tgt_B_onset_s',
+    'tgt_A_tilt_sign', 'tgt_B_tilt_sign',
     'n_responses', 'n_hits', 'n_misses', 'n_fa', 'n_fa_unattended', 'n_extra', 'n_ambiguous',
     'hits_A', 'misses_A', 'hits_B', 'misses_B', 'mean_rt_s',
     'flicker_hz_A', 'flicker_hz_B', 'pulse_hz_A', 'pulse_hz_B',
     'n_frames', 'n_dropped', 'max_frame_interval_ms',
     't_cue_onset', 't_stim_onset', 't_stim_offset',
-    'n_pips', 'n_preview_pips', 'audio_start_sched', 'av_offset_est_s',
+    'n_pips', 'audio_start_sched', 'av_offset_est_s',
     'iti_s', 'place_attempts', 'dot_seed', 'aborted'
   ];
 
@@ -39,6 +41,9 @@
   var FRAME_COLUMNS = [
     'pid', 'practice', 'trial', 'frame', 't_flip_s', 'on_A', 'on_B', 'pulse_A', 'pulse_B', 'tgt_A', 'tgt_B'
   ];
+
+  /* setup.csv: one row per setup value (DECISION 39) */
+  var SETUP_COLUMNS = ['field', 'value', 'default', 'source'];
 
   function fmt(v) {
     if (v === null || v === undefined) { return ''; }
@@ -111,6 +116,7 @@
     download(base + '_trials.csv', rowsToCsv(TRIAL_COLUMNS, this.trials));
     download(base + '_events.csv', rowsToCsv(EVENT_COLUMNS, this.events));
     download(base + '_frames.csv', this.framesCsv());
+    download(base + '_setup.csv', rowsToCsv(SETUP_COLUMNS, this.meta.setup || []));
     download(base + '_session.json', JSON.stringify(this.meta, null, 2), 'application/json');
   };
 
@@ -118,6 +124,7 @@
     TRIAL_COLUMNS: TRIAL_COLUMNS,
     EVENT_COLUMNS: EVENT_COLUMNS,
     FRAME_COLUMNS: FRAME_COLUMNS,
+    SETUP_COLUMNS: SETUP_COLUMNS,
     rowsToCsv: rowsToCsv,
     Recorder: Recorder
   };

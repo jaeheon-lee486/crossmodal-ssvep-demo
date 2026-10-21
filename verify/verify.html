@@ -56,9 +56,14 @@
     try { fn(); } catch (e) { report(label, false, 'threw: ' + e.message); }
   }
   function close(a, b) { return Math.abs(a - b) < 1e-9; }
+  function copy(x) { return JSON.parse(JSON.stringify(x)); }
+  function rejects(list, pattern) {
+    try { D.assertTrialList(list); } catch (e) { return pattern.test(e.message); }
+    return false;
+  }
 
   /* ------------------------------------------------ 1. parity */
-  head('1. Trial list vs golden fixture (seed ' + (window.XM_GOLDEN ? window.XM_GOLDEN.seed : '?') + ')');
+  head('1. Trial list vs golden fixture (seed ' + (window.XM_GOLDEN ? window.XM_GOLDEN.seed : '?') + ', default design settings)');
   var trials = null;
   safe('golden comparison', function () {
     if (!window.XM_GOLDEN) { report('golden fixture loaded', false, 'reference/golden_trials_seed12345.js missing'); return; }
@@ -77,39 +82,91 @@
       }
     }
     report('generated CSV is byte-identical to the Python reference', same, detail);
+    para('Block order: ' + r.blockTypes.join(' '));
   });
 
   /* ------------------------------------------------ 2. design audit */
   head('2. Design audit');
   safe('assertTrialList', function () {
     D.assertTrialList(trials);
-    report('assertTrialList passes (counts, 1:2:1 target balance, block composition, runs, ' +
-           'eligibility, >= 1.0 s target spacing, dir_A != dir_B)', true);
+    report('assertTrialList passes (block types and composition, burst-count distribution, all bursts of a trial ' +
+           'in one array -- the cued one in attend-one cells, A/B balanced per burst count in attend-both cells -- ' +
+           'eligibility, >= 1.0 s target spacing, tilt signs, ITI, dir_A != dir_B)', true);
   });
   safe('per-cell table', function () {
-    var rows = '<tr><th>cell</th><th>condition</th><th>trials</th><th>A targets</th><th>B targets</th></tr>';
+    var rows = '<tr><th>cell</th><th>condition</th><th>block type</th><th>trials</th>' +
+               '<th>0 / 1 / 2 / 3 bursts</th><th>trials with bursts in A / in B</th><th>A bursts</th><th>B bursts</th></tr>';
+    var allOk = true, wantN = { 1: 100, 2: 100, 3: 100, 4: 50, 5: 50 };
     CFG.CELLS.forEach(function (c) {
       var ct = trials.filter(function (t) { return t.cell === c.code; });
-      var sa = 0, sb = 0;
-      ct.forEach(function (t) { sa += t.n_tgt_A; sb += t.n_tgt_B; });
-      rows += '<tr><td>' + c.code + '</td><td>' + c.name + '</td><td>' + ct.length + '</td><td>' + sa + '</td><td>' + sb + '</td></tr>';
+      var sa = 0, sb = 0, ta = 0, tb = 0, both = 0, hist = [0, 0, 0, 0], lvA = [0, 0, 0, 0], lvB = [0, 0, 0, 0];
+      ct.forEach(function (t) {
+        sa += t.n_tgt_A; sb += t.n_tgt_B; hist[t.n_tgt_A + t.n_tgt_B]++;
+        if (t.n_tgt_A) { ta++; lvA[t.n_tgt_A]++; }
+        if (t.n_tgt_B) { tb++; lvB[t.n_tgt_B]++; }
+        if (t.n_tgt_A && t.n_tgt_B) { both++; }
+      });
+      var wantHist = [0, 0.9 * wantN[c.code], 0.1 * wantN[c.code], 0];
+      var arrOk = c.attend === 'A' ? tb === 0 : c.attend === 'B' ? ta === 0
+        : [1, 2, 3].every(function (v) { return Math.abs(lvA[v] - lvB[v]) <= 1; });
+      if (ct.length !== wantN[c.code] || hist.join() !== wantHist.join() || !arrOk || both) { allOk = false; }
+      rows += '<tr><td>' + c.code + '</td><td>' + c.name + '</td><td>' + c.blockType + '</td><td>' + ct.length +
+              '</td><td>' + hist.join(' / ') + '</td><td>' + ta + ' / ' + tb + '</td><td>' + sa + '</td><td>' + sb + '</td></tr>';
     });
     out.insertAdjacentHTML('beforeend', '<table>' + rows + '</table>');
+    var nOne = 0;
+    for (var b = 1; b <= CFG.N_BLOCKS; b++) {
+      var bt = trials.filter(function (t) { return t.block === b; });
+      if (bt[0].block_type === 'one') { nOne++; }
+      bt.forEach(function (t) { if (t.block_type === 'one' && t.sound_match !== 'none') { allOk = false; } });
+    }
+    report('defaults: 400 trials = 20 blocks x 20 (10 attend-one, 10 attend-both); cells 100 / 100 / 100 / 50 / 50; ' +
+           'bursts per trial exactly 90 % one, 10 % two in every cell; no trial with bursts in both arrays; ' +
+           'attend-one cells only in the cued array; attend-both cells A/B within 1 per burst count; ' +
+           'no sound in any attend-one block', allOk && nOne === 10 && trials.length === 400, nOne + ' attend-one blocks');
   });
-  safe('negative: assertTrialList catches a violation', function () {
-    var bad = JSON.parse(JSON.stringify(trials));
+  safe('negative: dir', function () {
+    var bad = copy(trials);
     bad[0].dir_B = bad[0].dir_A;
-    var threw = false;
-    try { D.assertTrialList(bad); } catch (e) { threw = /dir_A == dir_B/.test(e.message); }
-    report('a trial list with dir_A == dir_B is REJECTED', threw);
+    report('a trial list with dir_A == dir_B is REJECTED', rejects(bad, /dir_A == dir_B/));
   });
   safe('negative: spacing', function () {
-    var bad = JSON.parse(JSON.stringify(trials)), t = null;
-    for (var i = 0; i < bad.length; i++) { if (bad[i].n_tgt_A === 2) { t = bad[i]; break; } }
-    t.tgt_A_pulses = [D.eligiblePulses('A')[1], D.eligiblePulses('A')[2]];
-    var threw = false;
-    try { D.assertTrialList(bad); } catch (e) { threw = /ticks apart/.test(e.message); }
-    report('two targets closer than 1.0 s are REJECTED', threw);
+    var bad = copy(trials), t = null, i;
+    for (i = 0; i < bad.length; i++) { if (bad[i].n_tgt_A + bad[i].n_tgt_B === 2) { t = bad[i]; break; } }
+    if (t.n_tgt_A === 2) { t.tgt_A_pulses = [7, 8]; }                   // 126 / 144 ticks
+    else if (t.n_tgt_B === 2) { t.tgt_B_pulses = [8, 9]; }              // 121 / 136 ticks
+    else { t.tgt_A_pulses = [4]; t.tgt_B_pulses = [5]; }                // 72 / 76 ticks
+    report('two targets closer than 1.0 s are REJECTED', rejects(bad, /ticks apart/));
+  });
+  safe('negative: sound in attend-one block', function () {
+    var bad = copy(trials), t = bad.filter(function (x) { return x.block_type === 'one'; })[0];
+    t.cell = 4; t.cond = 'attend_both_soundA'; t.attend = 'both'; t.sound_match = 'A';
+    report('a sound trial inside an attend-one block is REJECTED', rejects(bad, /block \d+ \(one\): \d+ trials of cell/));
+  });
+  safe('negative: distractor burst', function () {
+    var bad = copy(trials), t = bad.filter(function (x) { return x.cell === 1 && x.n_tgt_A === 1; })[0];
+    t.n_tgt_A = 0; t.tgt_A_pulses = []; t.tgt_A_tilt_sign = []; t.tgt_A_onset_ticks = [];
+    t.n_tgt_B = 1; t.tgt_B_pulses = [4]; t.tgt_B_tilt_sign = [1]; t.tgt_B_onset_ticks = [61];
+    report('a burst in the UNCUED colour of an attend-one trial is REJECTED', rejects(bad, /uncued array B/));
+  });
+  safe('negative: bursts in both arrays', function () {
+    var bad = copy(trials), t = bad.filter(function (x) { return x.cell === 3 && x.n_tgt_A === 2; })[0];
+    t.n_tgt_A = 1; t.tgt_A_pulses = [4]; t.tgt_A_tilt_sign = [1]; t.tgt_A_onset_ticks = [72];
+    t.n_tgt_B = 1; t.tgt_B_pulses = [14]; t.tgt_B_tilt_sign = [1]; t.tgt_B_onset_ticks = [211];
+    report('a trial with bursts in BOTH arrays is REJECTED', rejects(bad, /bursts in both arrays/));
+  });
+  safe('negative: burst distribution', function () {
+    var bad = copy(trials), t = bad.filter(function (x) { return x.n_tgt_A === 1 && x.n_tgt_B === 0; })[0];
+    t.n_tgt_A = 0; t.tgt_A_pulses = []; t.tgt_A_tilt_sign = []; t.tgt_A_onset_ticks = [];
+    report('a list whose bursts-per-trial counts differ from the distribution is REJECTED',
+           rejects(bad, /bursts-per-trial counts/));
+  });
+  safe('practice', function () {
+    var pr = D.practiceTrials(D.generateTrialList(window.XM_GOLDEN.seed + CFG.PRACTICE_SEED_OFFSET).trials, CFG.PRACTICE_N);
+    var types = pr.map(function (t) { return t.block_type; }).join(' ');
+    report('practice: first 3 trials of an attend-one block, then 3 of an attend-both block, renumbered in block 0',
+           types === 'one one one both both both' && pr.every(function (t, i) { return t.block === 0 && t.trial === i + 1; }),
+           pr.map(function (t) { return t.cond; }).join(', '));
   });
 
   /* ------------------------------------------------ 3. frequency plan */
@@ -141,8 +198,8 @@
     var ok = p.A.flickerFrames === 9 && p.A.pulseFrames === 36 && p.B.flickerFrames === 10 && p.B.pulseFrames === 30 &&
              close(p.A.flickerHz, 40 / 3) && close(p.A.pulseHz, 10 / 3) && close(p.B.flickerHz, 12) && close(p.B.pulseHz, 4) &&
              close(p.A.flickerHz, 4 * p.A.pulseHz) && close(p.B.flickerHz, 3 * p.B.pulseHz) &&
-             p.stimFrames === 720 && p.stimFrames % 36 === 0 && p.stimFrames % 30 === 0;
-    report('standard @ 120 Hz: A 9/36 frames = 13.333/3.333 Hz (x4), B 10/30 frames = 12/4 Hz (x3), 720-frame epoch', ok);
+             p.stimFrames === 540 && p.stimFrames % 36 === 0 && p.stimFrames % 30 === 0;
+    report('standard @ 120 Hz: A 9/36 frames = 13.333/3.333 Hz (x4), B 10/30 frames = 12/4 Hz (x3), 540-frame (4.5 s) epoch', ok);
     para('Shared harmonics (both arrays&rsquo; series, &le; ' + CFG.SHARED_HARMONIC_REPORT_MAX_HZ + ' Hz): ' +
          p.sharedHarmonics.map(function (s) { return s.hz + ' Hz [' + s.label + ']'; }).join(', '));
   });
@@ -169,35 +226,81 @@
            !r.plan && r.errors.some(function (e) { return /^R7/.test(e); }), r.errors[0]);
   });
 
-  /* ------------------------------------------------ 3b. coherence settings (DECISION 28) */
-  head('3b. Coherence settings &mdash; validation and duty cycle');
-  /* [bg, tgt, duty, speed, burst speed, expected first rule or null];
+  /* ------------------------------------------------ 3b. setup settings */
+  head('3b. Setup settings &mdash; validation, defaults, duty cycle');
+  /* [bg, deviant coh, duty, speed, deviant speed, lum dip, tilt, expected first rule or null];
    * same cases as reference_design.py and verifyDesign.m */
   var vcases = [
-    [50, 95, 50, 5, 5, null], [25, 55, 100 / 3, 5, 10, null], [0, 100, 1, 0.5, 40, null],
-    [-1, 80, 100, 5, 5, 'V2'], [60, 101, 100, 5, 5, 'V2'], [60, 80, 0, 5, 5, 'V3'], [60, 80, 120, 5, 5, 'V3'],
-    [80, 60, 100, 5, 5, 'V4'], [70, 70, 100, 5, 5, 'V4'], [NaN, 80, 100, 5, 5, 'V1'],
-    [50, 95, 50, 0, 5, 'V5'], [50, 95, 50, 5, 41, 'V5'], [50, 95, 50, 5, NaN, 'V1']
+    [50, 95, 50, 5, 5, 0, 0, null], [25, 55, 100 / 3, 5, 10, 0, 0, null], [0, 100, 1, 0.5, 40, 0, 0, null],
+    [-1, 80, 100, 5, 5, 0, 0, 'V2'], [60, 101, 100, 5, 5, 0, 0, 'V2'],
+    [60, 80, 0, 5, 5, 0, 0, 'V3'], [60, 80, 120, 5, 5, 0, 0, 'V3'],
+    [80, 60, 100, 5, 5, 30, 0, 'V4'], [NaN, 80, 100, 5, 5, 0, 0, 'V1'],
+    [50, 95, 50, 0, 5, 0, 0, 'V5'], [50, 95, 50, 5, 41, 0, 0, 'V5'], [50, 95, 50, 5, NaN, 0, 0, 'V1'],
+    [70, 70, 100, 5, 5, 0, 0, 'V6'], [50, 50.3, 50, 5, 5, 0, 0, 'V6'], [0, 0, 50, 5, 10, 0, 30, 'V6'],
+    [50, 50, 50, 5, 5, 30, 0, null], [50, 50, 50, 5, 5, 0, 30, null], [50, 50, 50, 5, 10, 0, 0, null],
+    [50, 95, 50, 5, 10, 30, 30, null],
+    [50, 50, 50, 5, 5, -1, 0, 'V7'], [50, 50, 50, 5, 5, 101, 0, 'V7'],
+    [50, 50, 50, 5, 5, 0, -5, 'V8'], [50, 50, 50, 5, 5, 0, 91, 'V8'], [50, 50, 50, 5, 5, 0, 90, null],
+    [50, 95, 50, 5, 5, NaN, 0, 'V1']
   ];
   safe('validation cases', function () {
     var allOk = true, rows = [];
     vcases.forEach(function (c) {
-      var e = D.validateStimParams({ cohBgPct: c[0], cohTgtPct: c[1], dutyPct: c[2],
-                                     speedDegS: c[3], burstSpeedDegS: c[4] });
+      var e = D.validateStimParams({ cohBgPct: c[0], cohTgtPct: c[1], dutyPct: c[2], speedDegS: c[3], burstSpeedDegS: c[4],
+                                     lumDipPct: c[5], tiltDeg: c[6], resetMotion: false });
       var got = e.length ? e[0].slice(0, 2) : null;
-      if (got !== c[5]) { allOk = false; }
-      rows.push(c[0] + '/' + c[1] + '/' + (+c[2].toFixed(3)) + '/' + c[3] + '/' + c[4] + ' &rarr; ' + (got || 'ok'));
+      if (got !== c[7]) { allOk = false; }
+      rows.push(c[0] + '/' + c[1] + '/' + (+c[2].toFixed(3)) + '/' + c[3] + '/' + c[4] + '/' + c[5] + '/' + c[6] +
+                ' &rarr; ' + (got || 'ok'));
     });
-    report('setup-screen validation accepts valid settings and rejects out-of-range, non-numeric, ' +
-           'target &le; background, and out-of-range speeds (13 cases)', allOk, rows.join(', '));
+    report('stimulus settings: validation accepts valid settings (each deviant layer alone and all four together) and ' +
+           'rejects out-of-range, non-numeric, deviant coherence below background, bad speeds, luminance dip and tilt ' +
+           'outside 0&ndash;100 % / 0&ndash;90&deg;, and a deviant identical to a background pulse (25 cases)',
+           allOk, rows.join(', '));
+  });
+  /* [burst % for 0..3, attend-one blocks, sound-on %, expected first rule or null] */
+  var dcases = [
+    [[0, 90, 10, 0], 10, 50, null], [[25, 25, 25, 25], 0, 0, null], [[0, 0, 0, 100], 20, 100, null],
+    [[100 / 3, 100 / 3, 100 / 3, 0], 10, 50, null], [[0, 90, 10, 1], 10, 50, 'D3'], [[0, 90, 20, -10], 10, 50, 'D2'],
+    [[0, 90, 10, 0], 10, 101, 'D4'], [[0, 90, 10, 0], 10.5, 50, 'D5'], [[0, 90, 10, 0], 21, 50, 'D5'],
+    [[0, 90, NaN, 0], 10, 50, 'D1']
+  ];
+  safe('design cases', function () {
+    var allOk = true, rows = [];
+    dcases.forEach(function (c) {
+      var e = D.validateDesignParams({ burstPct: c[0], nOneBlocks: c[1], soundOnPct: c[2] });
+      var got = e.length ? e[0].slice(0, 2) : null;
+      if (got !== c[3]) { allOk = false; }
+      rows.push('[' + c[0].map(function (v) { return +(+v).toFixed(2); }) + ']/' + c[1] + '/' + c[2] + ' &rarr; ' + (got || 'ok'));
+    });
+    report('design settings: validation accepts valid settings and rejects non-numbers, % out of range, ' +
+           'burst % not adding to 100, sound-on out of range, a non-integer or too large block count (10 cases)',
+           allOk, rows.join(', '));
+    var m = D.burstCountMultiset(7, [25, 25, 25, 25]), h = [0, 0, 0, 0];
+    m.forEach(function (v) { h[v]++; });
+    report('burst counts by largest remainder: 7 trials at 25 / 25 / 25 / 25 % &rarr; 2 / 2 / 2 / 1',
+           h.join() === '2,2,2,1', h.join(' / '));
   });
   safe('defaults', function () {
     report('defaults: background 50 %, target 95 %, duty 50 % (50 and 95 of 100 dots), speeds 5 / 5 &deg;/s, ' +
-           '40 cm viewing distance, 60 cm screen width',
+           '40 cm viewing distance, 60 cm screen width; luminance dip 0 (off), tilt 0 (off), reset off; ' +
+           'bursts 0 / 90 / 10 / 0 %, 10 attend-one blocks, sound on 50 %',
            CFG.COH_BG_PCT_DEFAULT === 50 && CFG.COH_TGT_PCT_DEFAULT === 95 && CFG.DUTY_PCT_DEFAULT === 50 &&
            D.nCoherent(50, 100) === 50 && D.nCoherent(95, 100) === 95 &&
            CFG.DOT_SPEED_DEG_S_DEFAULT === 5 && CFG.BURST_SPEED_DEG_S_DEFAULT === 5 &&
-           CFG.VIEW_DIST_CM_DEFAULT === 40 && CFG.SCREEN_WIDTH_CM_DEFAULT === 60);
+           CFG.VIEW_DIST_CM_DEFAULT === 40 && CFG.SCREEN_WIDTH_CM_DEFAULT === 60 &&
+           CFG.LUM_DIP_PCT_DEFAULT === 0 && CFG.TILT_DEG_DEFAULT === 0 && CFG.TASK_MODES === undefined &&
+           CFG.RESET_MOTION_DEFAULT === false && CFG.BURST_PCT_DEFAULT.join() === '0,90,10,0' &&
+           CFG.N_ONE_BLOCKS_DEFAULT === 10 && CFG.SOUND_ON_PCT_DEFAULT === 50);
+  });
+  safe('timing', function () {
+    var itiOk = trials.every(function (t) { return t.iti_ticks >= 42 && t.iti_ticks <= 72; });
+    report('trial timing: ITI 0.7&ndash;1.2 s (42&ndash;72 ticks, every trial in range), cue 0.8 s, gap 0.5 s, stimulus 4.5 s; ' +
+           'targets 1.0&ndash;3.6 s, so every 0.15&ndash;0.90 s response window closes by stimulus end',
+           itiOk && CFG.ITI_MIN_TICKS === 42 && CFG.ITI_JITTER_TICKS === 30 && CFG.CUE_TICKS === 48 &&
+           CFG.GAP_TICKS === 30 && CFG.STIM_TICKS === 270 && CFG.TGT_MAX_ONSET_TICKS === 216 &&
+           CFG.TGT_MAX_ONSET_TICKS + CFG.RESP_WIN_MAX_S * CFG.GRID_HZ <= CFG.STIM_TICKS,
+           'eligible A ' + D.eligiblePulses('A').join(',') + ' | B ' + D.eligiblePulses('B').join(','));
   });
   safe('duty -> window', function () {
     var want = [[100, 36, 30], [50, 18, 15], [100 / 3, 12, 10], [10, 4, 3]], ok = true, det = [];
@@ -211,16 +314,22 @@
     report('a duty cycle too short for one frame (1 % of 36 frames) is REFUSED (R9)',
            !r.plan && r.errors.some(function (e) { return /^R9/.test(e); }), r.errors[0]);
   });
+  safe('dimmed colour', function () {
+    var a = S.dimmedColor([158, 0, 0], 30), b = S.dimmedColor([0, 0, 255], 30), c = S.dimmedColor([0, 0, 255], 100);
+    report('luminance dip in linear light (sRGB): red [158 0 0] and blue [0 0 255] at 30 % &rarr; [134 0 0] and ' +
+           '[0 0 218]; 100 % &rarr; black',
+           a.join() === '134,0,0' && b.join() === '0,0,218' && c.join() === '0,0,0', a.join(' ') + ' | ' + b.join(' '));
+  });
 
   /* ------------------------------------------------ 4. schedule + pips */
   head('4. Stimulus schedule and pip train (standard @ 120 Hz)');
   safe('continuous coherence', function () {
     var p = D.frequencyPlan('standard', 120, 100), s = D.stimulusSchedule(p), inA = 0, inB = 0, f, lastB = 0;
     for (f = 0; f < p.stimFrames; f++) { inA += s.A.pulse[f] >= 0 ? 1 : 0; inB += s.B.pulse[f] >= 0 ? 1 : 0; }
-    for (f = 0; f < p.stimFrames; f++) { if (s.B.pulse[f] === 23) { lastB++; } }
-    report('duty 100 %: every frame of A is coherent (720/720); B all but frames 0-1 before its first pulse ' +
-           '(718/720); the last B pulse is cut at the epoch end (28 of 30 frames)',
-           inA === 720 && inB === 718 && s.B.pulse[0] === -1 && s.B.pulse[1] === -1 && lastB === 28,
+    for (f = 0; f < p.stimFrames; f++) { if (s.B.pulse[f] === 17) { lastB++; } }
+    report('duty 100 %: every frame of A is coherent (540/540); B all but frames 0-1 before its first pulse ' +
+           '(538/540); the last B pulse is cut at the epoch end (28 of 30 frames)',
+           inA === 540 && inB === 538 && s.B.pulse[0] === -1 && s.B.pulse[1] === -1 && lastB === 28,
            'A ' + inA + ', B ' + inB + ', last B pulse ' + lastB + ' frames');
   });
   safe('schedule', function () {
@@ -229,42 +338,22 @@
     for (f = 0; f < p.stimFrames; f++) { onA += s.A.on[f]; onB += s.B.on[f]; }
     var firstA = Array.prototype.slice.call(s.A.on, 0, 18).join('');
     var firstB = Array.prototype.slice.call(s.B.on, 0, 22).join('');
-    report('A on-frames 400/720 (5 of every 9), B 360/720 (5 of every 10)', onA === 400 && onB === 360,
+    report('A on-frames 300/540 (5 of every 9), B 270/540 (5 of every 10)', onA === 300 && onB === 270,
            'A ' + firstA + '&hellip;, B ' + firstB + '&hellip;');
-    report('20 A pulses every 36 frames from frame 0; 24 B pulses every 30 frames from frame 2',
-           s.A.onsetFrames.length === 20 && s.B.onsetFrames.length === 24 &&
-           s.A.onsetFrames[19] === 684 && s.B.onsetFrames[0] === 2 && s.B.onsetFrames[23] === 692);
+    report('15 A pulses every 36 frames from frame 0; 18 B pulses every 30 frames from frame 2',
+           s.A.onsetFrames.length === 15 && s.B.onsetFrames.length === 18 &&
+           s.A.onsetFrames[14] === 504 && s.B.onsetFrames[0] === 2 && s.B.onsetFrames[17] === 512);
     report('every pulse starts on its own array\'s flicker ON edge (phase-locked)',
            s.A.onsetFrames.every(function (o) { return s.A.on[o] === 1 && (o === 0 || s.A.on[o - 1] === 0); }) &&
            s.B.onsetFrames.every(function (o) { return s.B.on[o] === 1 && s.B.on[o - 1] === 0; }));
     var ifi = 1 / 120;
     var pa = S.pipSchedule({ sound_match: 'A' }, s, ifi), pb = S.pipSchedule({ sound_match: 'B' }, s, ifi);
     var pn = S.pipSchedule({ sound_match: 'none' }, s, ifi);
-    report('pips: 20 locked to A (every 0.300 s), 24 locked to B (every 0.250 s), none in silent trials',
-           pa.length === 20 && pb.length === 24 && pn.length === 0 &&
-           close(pa[1].t_s - pa[0].t_s, 0.3) && close(pb[1].t_s - pb[0].t_s, 0.25));
-    /* sound preview (DECISION 30) */
-    var pf = (CFG.CUE_TICKS + CFG.GAP_TICKS) * p.framesPerTick;
-    var qa = S.previewPipSchedule({ sound_match: 'A' }, s, ifi, pf), qb = S.previewPipSchedule({ sound_match: 'B' }, s, ifi, pf);
-    var qn = S.previewPipSchedule({ sound_match: 'none' }, s, ifi, pf);
-    report('sound preview: cue + gap = 1.5 s holds whole periods of both arrays (P1)', D.previewCheck().length === 0,
-           D.previewCheck().join('; '));
-    report('preview pips: 5 for A from cue onset (-1.500 s), 6 for B (-1.483 s), none in silent trials; ' +
-           'each train continues into the stimulus pips one period later, without a gap',
-           qa.length === 5 && qb.length === 6 && qn.length === 0 &&
-           close(qa[0].t_s, -1.5) && close(qb[0].t_s, -1.5 + 2 / 120) &&
-           close(qa[4].t_s + 0.3, pa[0].t_s) && close(qb[5].t_s + 0.25, pb[0].t_s),
-           'A ' + qa.map(function (q) { return q.t_s.toFixed(3); }).join(' ') + ' | B ' +
-           qb.map(function (q) { return q.t_s.toFixed(3); }).join(' '));
-    /* the preview is its own buffer (main.js::runTrial): exactly cue + gap
-     * long, started at cue onset and stopped at stimulus onset */
-    var lead = pf * ifi, pb2 = S.pipTrainSamples(qa, lead, 48000, lead), firstNz = -1, lastNz = -1;
-    for (f = 0; f < pb2.length; f++) { if (pb2[f] !== 0) { if (firstNz < 0) { firstNz = f; } lastNz = f; } }
-    report('preview buffer is separate and exactly cue + gap long (1.5 s): its first pip starts at cue onset and ' +
-           'its last pip ends before stimulus onset, so it cannot sound during the dots',
-           pb2.length === Math.round(1.5 * 48000) && firstNz >= 0 && firstNz <= 1 && lastNz < pb2.length - 0.2 * 48000,
-           'length ' + pb2.length + ' samples; first non-zero ' + firstNz + ', last non-zero ' + lastNz +
-           ' (' + ((pb2.length - lastNz) / 48).toFixed(1) + ' ms of silence before stimulus onset)');
+    report('pips: 15 locked to A (every 0.300 s), 18 locked to B (every 0.250 s), none in silent trials; ' +
+           'all inside the stimulus (first at 0 s / 0.017 s)',
+           pa.length === 15 && pb.length === 18 && pn.length === 0 &&
+           close(pa[1].t_s - pa[0].t_s, 0.3) && close(pb[1].t_s - pb[0].t_s, 0.25) &&
+           pa[0].t_s >= 0 && pb[0].t_s >= 0 && pa[14].t_s < 4.5 && pb[17].t_s < 4.5);
     var smp = S.pipTrainSamples(pa.slice(0, 1), 0.1, 48000), peak = 0;
     for (f = 0; f < smp.length; f++) { peak = Math.max(peak, Math.abs(smp[f])); }
     report('pip waveform: ' + CFG.PIP_FREQ_HZ + ' Hz, ' + (CFG.PIP_DUR_S * 1000) + ' ms, peak ' + CFG.PIP_AMPLITUDE,
@@ -272,7 +361,7 @@
   });
 
   /* ------------------------------------------------ 5. dots */
-  head('5. Dot precomputation (trial 1, synthetic geometry)');
+  head('5. Dot precomputation (synthetic geometry)');
   safe('dots', function () {
     var p = D.frequencyPlan('standard', 120), s = D.stimulusSchedule(p);
     var geom = S.makeGeometry(0.027, 60, 1 / 120);
@@ -286,20 +375,23 @@
     for (i = 0; i < d.drawOrder.length; i++) { seen[d.drawOrder[i]] = 1; }
     report('draw order is a permutation of all ' + d.nTot + ' dots', Object.keys(seen).length === d.nTot);
   });
-  safe('coherent fraction', function () {
-    /* count A dots whose step on one frame is exactly the array's coherent step;
-     * dots respawned on that frame can only lower the count */
-    /* defaults (50 / 95 %, duty 50 %) but a burst speed of 10 deg/s, so the
-     * two speeds are told apart */
-    var sp = D.defaultStimParams();
+
+  /* Count A dots whose step from frame f-1 to f is exactly the step of length
+   * stepPx in direction angDeg; dots respawned on that frame can only lower
+   * the count. Defaults (50 / 95 %, duty 50 %) but a deviant speed of
+   * 10 deg/s, so the two speeds are told apart; over = further overrides. */
+  function coherentCounts(over, reset) {
+    var sp = D.defaultStimParams(), key;
     sp.burstSpeedDegS = 10;
+    for (key in over) { sp[key] = over[key]; }
+    sp.resetMotion = !!reset;
     var p = D.frequencyPlan('standard', 120, sp.dutyPct), s = D.stimulusSchedule(p);
     var geom = S.makeGeometry(0.027, 60, 1 / 120, sp), t = null, i;
-    for (i = 0; i < trials.length; i++) { if (trials[i].n_tgt_A > 0) { t = trials[i]; break; } }
+    for (i = 0; i < trials.length; i++) { if (trials[i].n_tgt_A > 0 && trials[i].tgt_A_pulses[0] > 1) { t = trials[i]; break; } }
     var d = S.precomputeDots(t, p, s, geom, sp), N = d.nPerArray;
-    var ang = CFG.DIR_ANGLE_DEG[t.dir_A] * Math.PI / 180;
-    function nCoh(f, stepPx) {
-      var n = 0, cdx = stepPx * Math.cos(ang), cdy = -stepPx * Math.sin(ang);
+    var base = CFG.DIR_ANGLE_DEG[t.dir_A];
+    function count(f, stepPx, angDeg) {
+      var n = 0, a = angDeg * Math.PI / 180, cdx = stepPx * Math.cos(a), cdy = -stepPx * Math.sin(a);
       for (var j = 0; j < N; j++) {
         var dx = d.x[f * d.nTot + j] - d.x[(f - 1) * d.nTot + j], dy = d.y[f * d.nTot + j] - d.y[(f - 1) * d.nTot + j];
         if (Math.abs(dx - cdx) < 1e-6 && Math.abs(dy - cdy) < 1e-6) { n++; }
@@ -307,15 +399,75 @@
       return n;
     }
     var kT = t.tgt_A_pulses[0], kB = kT - 1, vN = geom.speedPxPerFrame, vB = geom.burstSpeedPxPerFrame;
-    var inT = s.A.onsetFrames[kT] + 10, inB = s.A.onsetFrames[kB] + 10;     // inside the 18-frame window
-    var outB = s.A.onsetFrames[kB] + 25;                                     // after it (duty 50 %)
-    var nT = nCoh(inT, vB), nTslow = nCoh(inT, vN), nB = nCoh(inB, vN), nOut = nCoh(outB, vN) + nCoh(outB, vB);
-    report('trial ' + t.trial + ', duty 50 %: inside a target pulse 95 of 100 A dots move coherently at the BURST ' +
-           'speed (none at the normal speed); inside a background pulse 50 at the normal speed; after the ' +
-           'window, none',
+    return { t: t, d: d, s: s, p: p, N: N, sp: sp, geom: geom, kT: kT, kB: kB, vN: vN, vB: vB, base: base,
+             sign: t.tgt_A_tilt_sign[0], count: count, inT: s.A.onsetFrames[kT] + 10, inB: s.A.onsetFrames[kB] + 10,
+             outB: s.A.onsetFrames[kB] + 25 };
+  }
+
+  safe('deviant: coherence + speed', function () {
+    var c = coherentCounts({});
+    var nT = c.count(c.inT, c.vB, c.base), nTslow = c.count(c.inT, c.vN, c.base), nB = c.count(c.inB, c.vN, c.base);
+    var nOut = c.count(c.outB, c.vN, c.base) + c.count(c.outB, c.vB, c.base);
+    report('deviant coherence 95 % + speed 10 &deg;/s (trial ' + c.t.trial + ', duty 50 %): inside a deviant pulse 95 of ' +
+           '100 A dots move coherently at the DEVIANT speed (none at the normal speed); inside a background pulse 50 at ' +
+           'the normal speed; after the window, none',
            nT <= 95 && nT >= 88 && nTslow === 0 && nB <= 50 && nB >= 45 && nOut === 0,
-           'target pulse ' + kT + ': ' + nT + ' at burst, ' + nTslow + ' at normal; background pulse ' + kB + ': ' +
-           nB + '; after window: ' + nOut + ' (respawns can lower the first two by a few)');
+           'deviant pulse ' + c.kT + ': ' + nT + ' at deviant speed, ' + nTslow + ' at normal; background pulse ' + c.kB +
+           ': ' + nB + '; after window: ' + nOut + ' (respawns can lower the first two by a few)');
+  });
+  safe('deviant: motion layers off', function () {
+    var c = coherentCounts({ cohTgtPct: 50, burstSpeedDegS: 5, lumDipPct: 30 });
+    var t0 = JSON.parse(JSON.stringify(c.t));
+    t0.tgt_A_pulses = []; t0.tgt_B_pulses = []; t0.tgt_A_tilt_sign = []; t0.tgt_B_tilt_sign = [];
+    var d0 = S.precomputeDots(t0, c.p, c.s, c.geom, c.sp), same = true;
+    for (var i = 0; i < d0.x.length; i++) { if (d0.x[i] !== c.d.x[i] || d0.y[i] !== c.d.y[i]) { same = false; break; } }
+    report('deviant coherence and speed equal to the background, tilt 0 (luminance dip only): every dot position is ' +
+           'IDENTICAL to the same trial with no deviant at all &mdash; not distinguishable by motion',
+           same, 'compared ' + d0.x.length + ' positions');
+  });
+  safe('deviant: tilt only', function () {
+    var c = coherentCounts({ cohTgtPct: 50, burstSpeedDegS: 5, tiltDeg: 30 });
+    var tilted = c.base + c.sign * 30;
+    var nT = c.count(c.inT, c.vN, tilted), nStraight = c.count(c.inT, c.vN, c.base), nB = c.count(c.inB, c.vN, c.base);
+    report('tilt 30&deg; only: in a deviant pulse about 50 A dots move at the normal speed in the direction rotated by ' +
+           'sign x 30&deg; (none in the untilted direction); background pulses are untilted',
+           nT <= 50 && nT >= 44 && nStraight === 0 && nB <= 50 && nB >= 44,
+           'deviant pulse ' + c.kT + ' (sign ' + c.sign + ', ' + tilted + '&deg;): ' + nT + ' tilted, ' + nStraight +
+           ' straight; background pulse: ' + nB);
+  });
+  safe('deviant: all layers', function () {
+    var c = coherentCounts({ tiltDeg: 30, lumDipPct: 30 });
+    var tilted = c.base + c.sign * 30;
+    var nT = c.count(c.inT, c.vB, tilted), nStraight = c.count(c.inT, c.vB, c.base) + c.count(c.inT, c.vN, tilted);
+    report('coherence 95 % + speed 10 &deg;/s + tilt 30&deg; + dip 30 % together: about 95 A dots move at the deviant ' +
+           'speed in the tilted direction (none untilted, none tilted at the normal speed)',
+           nT <= 95 && nT >= 88 && nStraight === 0,
+           'deviant pulse ' + c.kT + ' (sign ' + c.sign + '): ' + nT + ' fast + tilted, ' + nStraight + ' otherwise');
+  });
+  safe('reset motion', function () {
+    function backCount(reset) {
+      var c = coherentCounts({}, reset), o = c.s.A.onsetFrames[c.kB], W = c.p.A.winFrames, r = o + W, nT = c.d.nTot;
+      var full = 0, back = 0;
+      for (var j = 0; j < c.N; j++) {
+        var allCoh = true;
+        for (var f = o; f < o + W; f++) {
+          var dx = c.d.x[f * nT + j] - c.d.x[(f - 1) * nT + j], dy = c.d.y[f * nT + j] - c.d.y[(f - 1) * nT + j];
+          var a = c.base * Math.PI / 180;
+          if (Math.abs(dx - c.vN * Math.cos(a)) > 1e-6 || Math.abs(dy + c.vN * Math.sin(a)) > 1e-6) { allCoh = false; break; }
+        }
+        if (!allCoh) { continue; }
+        full++;
+        var ex = c.d.x[r * nT + j] - c.d.x[(o - 1) * nT + j], ey = c.d.y[r * nT + j] - c.d.y[(o - 1) * nT + j];
+        if (Math.abs(Math.sqrt(ex * ex + ey * ey) - c.vN) < 1e-6) { back++; }
+      }
+      return [full, back];
+    }
+    var on = backCount(true), off = backCount(false);
+    report('reset motion: on the first frame after a coherent window, every dot that swept for the whole window is back ' +
+           'at its pre-window position plus one ordinary step; with reset off, none is',
+           on[0] >= 40 && on[1] >= on[0] - 3 && on[1] <= on[0] && off[0] >= 40 && off[1] === 0,
+           'reset on: ' + on[1] + ' of ' + on[0] + ' back; reset off: ' + off[1] + ' of ' + off[0] +
+           ' (a respawn on that frame can lower the first)');
   });
 
   /* ------------------------------------------------ 6. scoring */
